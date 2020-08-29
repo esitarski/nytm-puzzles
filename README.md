@@ -22,4 +22,4 @@ Please take these programs the right way - a way of experiencing and enjoying th
 I acknowledge that humans puzzle solvers likely don't approach the problems in any way similar to the algorithms.
 Perhaps one day I will understand how anyone does it manually as I have not succeded, and I was able to write the programs in less time.
 
-If you have any suggestions or improvements, let me know.
+The best reference is too look at the source code in the html files.  If you have any suggestions or comments, let me know.
