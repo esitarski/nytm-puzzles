@@ -11,10 +11,15 @@ in early stages which can take a relatively __long__ time to fix.
 
 As the puzzle gets filled in, solution possibilitiees are reduced.  Additionally, the algorithm's feasibiliy tests begin to trim the decision tree.
 
-For this reason, and to guard against pathologically designed puzzles, the choice between indistiguishable decisions are randomized.
-This means that sometimes the problem is solved much faster as the algorithm "got lucky" in the initial stages.
+For this reason, and to guard against pathologically designed puzzles, the makea a random choice between what it considers equivalent options.
+This means that sometimes the problem is solved much faster if the algorithm "got lucky" in the initial stages.
 
-Finally, please take these programs the right way - a way of experiencing and enjoying them.
-I expect that humans puzzle solvers don't approach the problem in any way similar to the algorithm
+Ideally there would be a better way to prioritize decisions in early stages (perhaps some grid weighting approach).  Alternatively, perhaps there is a way for the algorithm to repair bad
+sections of the grid rather than doing a lengthy backtrack back to the bad decision.
 
-And, if you have any suggestions or improvements, let me know.
+Finally, please take these programs the right way - a way of experiencing and enjoying the puzzles, with credit to the puzzle creators.
+
+I acknowledge that humans puzzle solvers likely don't approach the problems in any way similar to the algorithms.
+Perhaps one day I will understand how anyone does it manually as I have not succeded, and I was able to write the programs in less time.
+
+If you have any suggestions or improvements, let me know.
