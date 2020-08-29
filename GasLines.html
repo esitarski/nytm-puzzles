@@ -1,0 +1,464 @@
+<html>
+<head>
+<meta name="description" content="Constraint-based Solver for Gas Lines puzzle by Thinh Van Duc Lai">
+<meta name="keywords" content="Gas Lines,New York Times, Puzzles,Wei-Hwa Huang">
+<meta name="author" content="Edward Sitarski">
+<script>
+//-----------------------------------------------------------------------
+//
+// Constraint Propagation solver for Gas Lines puzzle from New York Times Magazine.
+//
+// Edward Sitarski
+// August 6th, 2020
+// Toronto, Ontario, Canada
+//
+//-----------------------------------------------------------------------
+"use strict";
+
+class SolutionFound extends Error {
+	// Some off-roading here.  Use throw to exit the recursion when we find a solution.
+	// So... catching this "Error" means success ;)
+}
+
+const i_adjacent = [[1,0], [-1,0], [0,1], [0,-1]];
+const occupied = 1.0/8.0;	// Special value for occupied cells.
+
+class Line extends Array {
+	constructor( r, c, segment_count_target ) {
+		super();
+		this.segment_count_target = segment_count_target
+		this.segment_count = 0
+		super.push( [r, c] );
+	}
+		
+	is_new_segment() {
+		let line_length = this.length;
+		if( line_length === 2 ) return true;
+		if( line_length === 1 ) return false;
+		
+		// Check whether the last 3 points are colinear.  If not, this is a new line.
+		return !(
+			(this[line_length-3][0] === this[line_length-2][0] && this[line_length-2][0] === this[line_length-1][0]) ||
+			(this[line_length-3][1] === this[line_length-2][1] && this[line_length-2][1] === this[line_length-1][1])
+		);
+	}
+		
+	push( grid, r, c ) {
+		// Occupy this coordinate on the grid.
+		super.push( [r, c] );
+		if( !grid[r][c] )
+			grid[r][c] = occupied;
+		this.segment_count += +this.is_new_segment();
+	}
+		
+	pop( grid ) {
+		// Release this grid coordinate.
+		let [r, c] = this[this.length-1];
+		if( grid[r][c] === occupied )
+			grid[r][c] = 0;
+		this.segment_count -= +this.is_new_segment();
+		super.pop()
+	}
+		
+	terminated( grid ) {
+		if ( this.segment_count_target != this.segment_count ) return false;
+		let [r, c] = this[this.length-1];
+		return grid[r][c] == -1;
+	}
+		
+	can_be_completed( grid ) {
+		// Check if this gas line can be connected to a terminal while respecting its segment constraints.
+		// If it fails, it proves the current grid is infeasible.
+		// If it succeeds, the state of the current grid is indeterminate.
+		// This can be called at any time during the search, however, it is expensive.
+		// Currently this is only called after a feasible connection is found.
+		if( this.length > 1 )
+			return true;
+		const grid_size = grid.length;
+		
+		var line = this;	// Necessary for nested explore function.
+		function explore() {
+			let [r, c] = line[line.length-1];
+			for( let i = 0; i < i_adjacent.length; ++i ) {
+				let r_cur = r + i_adjacent[i][0], c_cur = c + i_adjacent[i][1];
+				if( 0 <= r_cur && r_cur < grid_size && 0 <= c_cur && c_cur < grid_size && grid[r_cur][c_cur] <= 0 ) {
+					line.push( grid, r_cur, c_cur );
+					
+					if ( line.segment_count <= line.segment_count_target ) {
+						if ( grid[r_cur][c_cur] === -1 ) {
+							if ( line.segment_count === line.segment_count_target )
+								throw( new SolutionFound() );	// Off-label use of throw - allows us to exit from all levels of recursion.
+						}
+						else {
+							explore();
+						}
+					}
+					line.pop( grid );
+				}
+			}
+		}
+		
+		let is_feasible = false;
+		try {
+			explore();
+		}
+		catch ( result  ) {
+			if ( result instanceof SolutionFound )
+				is_feasible = true;
+			else
+				throw( result );
+		}
+		
+		// Cleanup.
+		while ( this.length > 1 )
+			this.pop( grid );
+		return is_feasible;
+	}
+	
+	copy() {
+		let line = new Line( ...this[0], this.segment_count_target );
+		for ( let i = this.length - 1; i >= 1; --i )
+			line[i] = this[i];
+		return line;
+	}
+}
+								
+class GasLines {
+	constructor( callback=null ) {
+		this.callback = callback;
+		this.set_problem();
+	}
+		
+	set_problem() {
+		this.grid = [];
+		let table = document.getElementById('gaslines_table_id');
+		for ( let r = 0, n = table.rows.length; r < n; r++) {
+			let row = [];
+			for ( let c = 0, m = table.rows[r].cells.length; c < m; c++ ) {
+				let v = table.rows[r].cells[c].firstChild.value.trim();
+				if ( v == '@' )
+					row.push( -1 );
+				else {
+					v = parseInt( v, 10 );
+					if ( isNaN(v) ) {
+						v = '';
+						row.push( 0 );
+					}
+					else
+						row.push( v );
+				}
+				table.rows[r].cells[c].firstChild.value = String(v);
+			}
+			this.grid.push( row );
+		}
+		this.prolog();
+	}
+			
+	prolog() {
+		// Initialize the gas lines and terminals from the problem grid.
+		this.lines = [];
+		this.terminals = [];
+		for ( let r = 0; r < this.grid.length; ++r ) {
+			for ( let c = 0; c < this.grid.length; ++c ) {
+				let v = this.grid[r][c];
+				if ( v != 0 ) {
+					if ( v > 0 )
+						this.lines.push( new Line(r, c, v) );
+					else if ( v == -1 )
+						this.terminals.push( [r, c] );
+				}
+			}
+		}
+		
+		// Sort the gas lines by increasing number of segments.
+		// This seems to work faster.
+		this.lines.sort( function(a, b) { return a.segment_count_target - b.segment_count_target; } )
+	}
+	
+	adjacent_cells( r, c ) {
+		// Return cells adjacent to the given coordinate while avoiding occupied cells.   Also returns terminals.
+		let size = this.grid.length;
+		let cells = [];
+		for ( let i = 0; i < i_adjacent.length; ++i ) {
+			let r_next = r + i_adjacent[i][0], c_next = c + i_adjacent[i][1];
+			if ( 0 <= r_next && r_next < size && 0 <= c_next && c_next < size && this.grid[r_next][c_next] <= 0 )
+				cells.push( [r_next, c_next] );
+		}
+		return cells;
+	}
+				
+	grow( i_line ) {
+		let line = this.lines[i_line];
+		let cells = this.adjacent_cells( ...line[line.length-1] );
+		while ( cells.length != 0 ) {
+			let [r_next, c_next] = cells.pop();
+			line.push( this.grid, r_next, c_next );
+			
+			if ( this.callback )
+				this.callback( this );
+			
+			if ( line.segment_count <= line.segment_count_target ) {			// Check if <= required number of segments in this gas line.
+				if ( this.grid[r_next][c_next] == -1 ) {						// Found a termination cell.
+					if ( line.segment_count == line.segment_count_target ) {	// Check if we have correct number of segments.  If so, this gas line is done.
+						if ( i_line + 1 == this.lines.length ) {				// If no more gas lines to process, the problem is solved.
+							throw( new SolutionFound() );
+						}
+						else {
+							let all_feasible = true;							// Check if the remaining gas lines still have a feasible solution.
+							for ( let f = i_line + 1; f < this.lines.length && all_feasible; ++f )
+								all_feasible = this.lines[f].can_be_completed( this.grid );
+							if ( all_feasible )
+								this.grow( i_line + 1 );						// Continue the recursive search with the next gas line.
+						}
+					}
+				}
+				else {
+					this.grow( i_line );										// Else, continue the recursive search with this gas line.
+				}
+			}
+			
+			line.pop( this.grid );												// Backtrack.
+		}
+	}
+	
+	solve() {
+		if ( this.callback )
+			this.callback( this );
+		
+		try {
+			this.grow( 0 );
+		}
+		catch( result ) {
+			if ( result instanceof SolutionFound )
+				return true;
+			else
+				throw( result );
+		}
+		return false;
+	}
+	
+	to_console() {
+		console.log( '-----' );
+		for( let i = 0; i < this.lines.length; ++i ) {
+			let line = this.lines[i];
+			let line_str = [];
+			for( let j = 0; j < line.length; ++j )
+				line_str.push( '(' + line[j][0] + ',' + line[j][1] + ')' );
+			console.log( line.segment_count_target + ': ' + line_str.join('') )
+		}
+	}
+
+	graphic( canvas ) {
+		const frame_size = canvas.width;
+		let ctx = canvas.getContext("2d");
+		
+		ctx.clearRect( 0, 0, canvas.width, canvas.height );
+		
+		const border = frame_size / 20;
+		const grid_size = this.grid.length - 1;
+		function x_y( r, c ) {
+			let x = border + (c * ((frame_size - border*2) / grid_size)), y = border + (r * ((frame_size - border*2) / grid_size));
+			return [x, y];
+		}
+		
+		ctx.font = border + "px Arial";
+		
+		// Draw the grid.
+		ctx.strokeStyle = 'rgb(160,160,160)';
+		for ( let i = 0; i < this.grid.length; ++i ) {
+			ctx.beginPath(); ctx.moveTo( ...x_y(i, 0) ); ctx.lineTo( ...x_y(i,grid_size) ); ctx.stroke();
+			ctx.beginPath(); ctx.moveTo( ...x_y(0, i) ); ctx.lineTo( ...x_y(grid_size,i) ); ctx.stroke();
+		}
+
+		// Draw the gas lines.
+		ctx.lineWidth = frame_size / 60;
+		ctx.strokeStyle = 'rgb(0,0,0)';
+		for( let i = 0; i < this.lines.length; ++i ) {
+			let line = this.lines[i];
+			if ( line.length > 1 ) {
+				ctx.beginPath();
+				ctx.moveTo( ...x_y(...line[0]) );
+				for( let j = 1; j < line.length; ++j )
+					ctx.lineTo( ...x_y(...line[j]) );
+				ctx.stroke();
+			}
+		}
+				
+		// Draw the gas line origins with number of segments.
+		ctx.lineWidth = 1;
+		ctx.textAlign = 'center';
+		ctx.textBaseline = 'middle';
+		let radius = frame_size / 25;
+		for( let i = 0; i < this.lines.length; ++i ) {
+			let line = this.lines[i];
+			ctx.beginPath();
+			ctx.arc( ...x_y(...line[0]), radius, 0, 2.0*Math.PI );
+			ctx.fillStyle = '#FFFFFF';
+			ctx.fill();
+			ctx.stokeStyle = '#000000';
+			ctx.stroke();
+			
+			ctx.fillStyle = '#000000';
+			ctx.fillText( ''+line.segment_count_target, ...x_y(...line[0]) );
+		}
+		
+		// Draw the terminals.
+		radius *= 0.8;
+		ctx.stokeStyle = '#000000';
+		ctx.fillStyle = '#000000';
+		for( let i = 0; i < this.terminals.length; ++i ) {
+			ctx.beginPath();
+			ctx.arc( ...x_y(...this.terminals[i]), radius, 0, 2.0*Math.PI );
+			ctx.fill();
+		}
+	}
+}
+
+function do_solve() {
+	let canvas = document.getElementById('canvas_id');
+	const animate = document.getElementById("animate_id").checked;
+	
+	// Solve with animation (hack!).
+	// Keep track of all the intermediate solver states.
+	var states = [];
+	function store_state( gs ) {
+		let state = [];
+		for( let i = 0; i < gs.lines.length; ++i )
+			state.push( gs.lines[i].copy() );
+		states.push( state );
+	}
+	let gs = new GasLines( animate ? store_state : null );
+	if( !gs.solve() )
+		alert( 'No solution found.  Check that the problem is input correctly.' );
+	store_state( gs );
+	
+	// Play the states back to show the solution process.
+	document.getElementById('solve_id').disabled = true;
+	states.reverse();
+	var interval_id = setInterval( draw_state, 1000/50 );
+	function draw_state() {
+		if ( states.length > 0 ) {
+			let state = states.pop();
+			gs.lines = state;
+			gs.graphic( canvas );
+		}
+		else {
+			clearInterval( interval_id );
+			document.getElementById('solve_id').disabled = false;
+		}
+	}
+}
+		
+</script>
+<style>
+body { font-size: 140%; font-family:"Lucida Sans Unicode", "Lucida Grande", "sans-serif"; }
+input {
+	width:2em;
+	border-width: 1;
+	border-style: solid;
+	border-color: rgb(160,160,160);
+	box-shadow: none;
+}
+
+.row {
+  display: flex;
+}
+.column {
+  flex: 50%;
+}
+</style>
+</head>
+
+<body>
+<h1>Gasline Puzzle Solver <span style="font-size:50%">Edward Sitarski, August 2020</span></h1>
+<p>
+Enter the problem in the grid.  For terminals, use the '@' character.  Then press Solve.
+</p>
+<div class="row">
+<div class="column">
+<table id="gaslines_table_id">
+	<tbody>
+		<tr>
+			<td><input value="2"/></td>
+			<td><input/></td>
+			<td><input value="@"/></td>
+			<td><input/></td>
+			<td><input value="2"/></td>
+			<td><input/></td>
+			<td><input/></td>
+		</tr>
+		<tr>
+			<td><input/></td>
+			<td><input value="4"/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input value="4"/></td>
+		</tr>
+		<tr>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input value="2"/></td>
+			<td><input/></td>
+			<td><input/></td>
+		</tr>
+		<tr>
+			<td><input/></td>
+			<td><input value="@"/></td>
+			<td><input value="1"/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input value="@"/></td>
+			<td><input/></td>
+		</tr>
+		<tr>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+		</tr>
+		<tr>
+			<td><input/></td>
+			<td><input value="3"/></td>
+			<td><input value="@"/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input value="4"/></td>
+			<td><input/></td>
+		</tr>
+		<tr>
+			<td><input value="4"/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+		</tr>
+	</tbody>
+</table>
+</div>
+<div class="column" style="font-size:70%">
+<p>
+	<strong>Gas Lines</strong> by Thinh Van Duc Lai<br>
+	<br>
+	Connect each home (circled number) to a gas utility<br>
+	(black circle) by a line that follows the dots.  The line<br>
+	must have the number of straight segments indicated.<br>
+	No lines can touch.<br>
+	<br>
+	<i>New York Times Magazine, Puzzles</i>
+</p>
+</div>
+</div>
+<hr>
+<button id="solve_id" onclick="do_solve();">Solve</button>  <input type="checkbox" id="animate_id"><label for="animate_id" style="font-size:70%">Animate</label></input>
+<hr>
+<canvas width=300 height=300 id="canvas_id"></canvas>
+</body>

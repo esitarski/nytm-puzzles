@@ -1,0 +1,481 @@
+<html>
+<head>
+<meta name="description" content="Constraint-based Solver for Yin-Yang puzzle by Wei-Hwa Huang">
+<meta name="keywords" content="Yin-Yang,New York Times, Puzzles,Wei-Hwa Huang">
+<meta name="author" content="Edward Sitarski">
+<script>
+//-----------------------------------------------------------------------
+//
+// Constraint Propagation solver for Yin Yang puzzle from New York Times Magazine.
+//
+// Edward Sitarski
+// August 17th, 2020
+// Toronto, Ontario, Canada
+//
+//-----------------------------------------------------------------------
+"use strict";
+
+class SolutionFound extends Error {
+	// Some off-roading here.  Use throw to exit the recursion when we find a solution.
+	// So... catching this "Error" means success ;)
+}
+
+function key_from_grid( grid, r, c ) {
+	return [grid[r][c], grid[r][c+1], grid[r+1][c], grid[r+1][c+1]].join('');
+}
+	
+function to_key( square ) {
+	// Return the contents of a 2x2 square as a 4-char string.
+	// This is required because Javascript Map does not work with Array keys (a1 === a2 fails even if a1, a2 have the same elements).
+	return [square[0][0], square[0][1], square[1][0], square[1][1]].join('');
+}
+
+function get_square( grid, r, c ) {
+	return [
+		[grid[r][c], grid[r][c+1]],
+		[grid[r+1][c], grid[r+1][c+1]]
+	];
+}
+	
+function square_to_grid( grid, r, c, square ) {
+	grid[r][c]     = square[0][0];
+	grid[r][c+1]   = square[0][1];
+	grid[r+1][c]   = square[1][0];
+	grid[r+1][c+1] = square[1][1];
+}
+
+function shuffle( a ) {
+	for( let i = a.length - 1; i > 0; --i ) {
+		const j = Math.floor(Math.random() * i);
+		[a[i], a[j]] = [a[j], a[i]];
+	}
+	return a;
+}
+
+const i_adjacent = [[1,0], [-1,0], [0,1], [0,-1]];
+class YinYang {
+	constructor( callback=null ) {
+		this.callback = callback;
+		this.set_problem();
+		
+		// Generate all feasible 2-squares.
+		let feasible_2_squares = [];
+		for( let i = 1; i < 15; ++i )	// 1 to 15 eliminates the squares of all the save value (disallowed).
+			feasible_2_squares.push( new Array(
+					[(i&(1<<0)) ? 1 : 2,	 (i&(1<<1)) ? 1 : 2],
+					[(i&(1<<2)) ? 1 : 2,	 (i&(1<<3)) ? 1 : 2]
+				)
+			);
+			
+		// Create a map for all completion options for each incomplete 2x2 square.
+		this.branches = new Map();
+		for( let i = 0; i < feasible_2_squares.length; ++i ) {
+			const s = feasible_2_squares[i];
+			for( let k = 1; k < 16; ++k ) {
+				// Systematically make empty cells in the feasible 2 square to create an "incomplete 2-square".
+				const sb = [
+					[(k&(1<<0)) ? 0 : s[0][0], (k&(1<<1)) ? 0 : s[0][1]],
+					[(k&(1<<2)) ? 0 : s[1][0], (k&(1<<3)) ? 0 : s[1][1]],
+				];
+				// Create a String key for the incomplete 2-square.
+				const sb_key = to_key( sb );
+				if( !this.branches.has( sb_key ) ) {
+					// Create an array of all possible solutions to the incomplete 2-square.
+					this.branches.set( sb_key, shuffle( feasible_2_squares.filter( op =>
+							(!sb[0][0] || sb[0][0] === op[0][0]) && (!sb[0][1] || sb[0][1] === op[0][1]) &&
+							(!sb[1][0] || sb[1][0] === op[1][0]) && (!sb[1][1] || sb[1][1] === op[1][1])
+						) )
+					);
+				}
+			}
+		}
+		
+		// Create all possible 2x2 start coords.
+		this.rc2x2 = [];
+		for( let r = this.grid.length - 1; --r >= 0; )
+			for( let c = this.grid.length - 1; --c >= 0; )
+				this.rc2x2.push( [r, c] );
+	}
+	
+	set_problem() {
+		// Get the problem from the html.
+		this.grid = [];
+		let table = document.getElementById('yinyang_table_id');
+		for ( let r = 0, n = table.rows.length; r < n; r++) {
+			let row = [];
+			for ( let c = 0, m = table.rows[r].cells.length; c < m; c++ ) {
+				let v = table.rows[r].cells[c].firstChild.value.trim() || '#';
+				if ( '0Oo'.includes(v) ) {
+					row.push( 1 );
+					v = 'O';
+				}
+				else if ( 'Xx1'.includes(v) ) {
+					row.push( 2 );
+					v = 'X';
+				}
+				else {
+					row.push( 0 );
+					v = '';
+				}
+				table.rows[r].cells[c].firstChild.value = v;
+			}
+			this.grid.push( row );
+		}
+	}
+			
+	connected( color ) {
+		// Check that all cells of a given color can be connected with horizontal or vertical paths.
+		const grid = this.grid;
+		const grid_size = grid.length;
+		
+		// Create a simple deque for the Breadth First Search.
+		let cells_pending = new Array( grid_size * grid_size );
+		let i_begin = 0, i_end = 0;
+		
+		// Find a cell of the given color to start.
+		let r_start, c_start;
+		for( r_start = 0; r_start < grid_size; ++r_start )
+			if( (c_start = grid[r_start].indexOf(color)) >= 0 )
+				break;
+		
+		if( r_start >= grid_size )	// If no start cell, return true (no cells to connect).
+			return true;
+
+		// Create a flag for each grid element indicating that the cell was visited.
+		// Initially, all false.
+		let visited = new Array( grid_size );
+		for( let r = 0; r < grid_size; ++r )
+			visited[r] = new Array( grid_size ).fill( false );
+		
+		// Put the start cell on the deque and mark it as visited.
+		cells_pending[i_end++] = [r_start, c_start];
+		visited[r_start][c_start] = true;
+				
+		// Do a BFS search from the starting cell.
+		// Expand the search to unvisited empty cells or cells of the same color.
+		while( i_begin !== i_end ) {
+			let [r_cur, c_cur] = cells_pending[i_begin++];
+			for( let i = i_adjacent.length; i--; ) {
+				const r_next = r_cur + i_adjacent[i][0], c_next = c_cur + i_adjacent[i][1];
+				if( 	0 <= r_next && r_next < grid_size && 0 <= c_next && c_next < grid_size &&
+						!visited[r_next][c_next] && (grid[r_next][c_next] === 0 || grid[r_next][c_next] === color) ) {
+					cells_pending[i_end++] = [r_next, c_next];
+					visited[r_next][c_next] = true;
+				}
+			}
+		}
+		
+		// Check that all cells of this color were reached by horizontal or vertical paths.
+		for( let r = grid_size; r--; )
+			for( let c = grid_size; c--; )
+				if( grid[r][c] === color && !visited[r][c] )
+					return false;
+		return true;
+	}
+	
+	search() {
+		let rc_best = null, options_best = null;
+		
+		// For all 2x2 squares, find the square with the fewest solution options.
+		// If the grid is full, no partial 2x2 squares will match.
+		shuffle( this.rc2x2 );
+		for( let i = this.rc2x2.length; i--; ) {
+			let [r, c] = this.rc2x2[i];
+			let options = this.branches.get(key_from_grid(this.grid, r, c));
+			if( options && (options_best === null || options.length < options_best.length) ) {
+				rc_best = [r, c];
+				options_best = options;
+			}
+		}
+		
+		if( options_best === null )				// If no incomplete 2-squares are found, the grid is complete.
+			throw( new SolutionFound );
+					
+		// Try each 2x2 solution option.
+		let square_save = get_square( this.grid, ...rc_best );
+		for( let i = 0; i < options_best.length; ++i ) {
+			square_to_grid( this.grid, ...rc_best, options_best[i] );
+			++this.state_count;
+			if ( this.callback )
+				this.callback( this );
+			
+			// Check that both colors are still connected.  If so, recurse the search.
+			if( this.connected(1) && this.connected(2) )
+				this.search();
+		}
+		// No solution found down this path.  Restore the original state before popping the stack.
+		square_to_grid( this.grid, ...rc_best, square_save );
+	}
+	
+	solve() {
+		if ( this.callback )
+			this.callback( this );
+		this.state_count = 0;
+		
+		try {
+			this.search();
+		}
+		catch( result ) {
+			if ( result instanceof SolutionFound )
+				return true;
+			else
+				throw( result );
+		}
+		return false;
+	}
+	
+	to_console() {
+		console.log( '-----' );
+		for( let r = 0; r < this.grid.length; ++r )
+			console.log( this.grid[r].join(',') );
+	}
+
+	graphic( canvas ) {
+		const frame_size = canvas.width;
+		let ctx = canvas.getContext("2d");
+		
+		ctx.clearRect( 0, 0, canvas.width, canvas.height );
+		
+		const border = frame_size / 20;
+		const grid_size = this.grid.length;
+		const cell_size = (frame_size - border*2) / grid_size;
+		
+		// Draw the grid.
+		ctx.lineWidth = 1;
+		ctx.strokeStyle = 'rgb(160,160,160)';
+		for ( let i = 0; i <= this.grid.length; ++i ) {
+			const v = border + i * cell_size;
+			ctx.beginPath(); ctx.moveTo( v, border ); ctx.lineTo( v, frame_size-border ); ctx.stroke();
+			ctx.beginPath(); ctx.moveTo( border, v ); ctx.lineTo( frame_size-border, v ); ctx.stroke();
+		}
+
+		// Draw the circles.
+		ctx.lineWidth = frame_size / 60;
+		ctx.strokeStyle = '#000000';
+		const radius = cell_size * 0.75 / 2.0;
+		const left = border + cell_size / 2, top = left;
+		for( let r = 0; r < grid_size; ++r ) {
+			for( let c = 0; c < grid_size; ++c ) {
+				if( this.grid[r][c] !== 0 ) {
+					let x = left + c * cell_size, y = top + r * cell_size;
+					ctx.beginPath();
+					ctx.arc( x, y, radius, 0, 2.0*Math.PI );
+					ctx.fillStyle = (this.grid[r][c] == 1 ? '#FFFFFF' : '#000000');
+					ctx.fill();
+					ctx.stroke();				}
+			}
+		}
+	}
+}
+
+var continue_animation = true;
+var interval_id = null;
+function do_solve() {
+	let canvas = document.getElementById('canvas_id');
+	let states_considered = document.getElementById('states_considered_id');
+	const animate = document.getElementById("animate_id").checked;
+	
+	// Stop the current animation.
+	continue_animation = animate;
+	if ( interval_id !== null ) {
+		clearInterval( interval_id );
+		interval_id = null;
+	}
+	
+	// So the solve.
+	// Keep track of all the intermediate solver states.
+	var states = [];
+	function store_state( yy ) {
+		let state = new Array( yy.grid.length );
+		for( let i = 0; i < yy.grid.length; ++i )
+			state[i] = yy.grid[i].slice(0);
+		states.push( state );
+	}
+	let yy = new YinYang( animate ? store_state : null );
+	if( !yy.solve() )
+		alert( 'No solution found.  Check that the problem is input correctly.' );
+	store_state( yy );
+	
+	// Play the states back to show the solution process.
+	states.reverse();
+	function draw_state() {
+		if ( !continue_animation )
+			states = states.slice( 0, 1 );
+		
+		if ( states.length > 0 ) {
+			yy.grid = states.pop();
+			yy.graphic( canvas );
+			states_considered.innerHTML = (yy.state_count - states.length) + ' / ' + yy.state_count;
+		}
+		else {
+			clearInterval( interval_id );
+			interval_id = null;
+			states_considered.innerHTML = yy.state_count;		
+		}
+	}
+	interval_id = setInterval( draw_state, 1000/50 );
+}
+
+var problems = [
+	[
+		"XX..O..",
+		"X..O...",
+		".O.O.O.",
+		"O.....O",
+		".O.X.O.",
+		"...O..O",
+		"..O..OO"
+	],
+	[
+		"..O....",
+		".O.O...",
+		"..O....",
+		"....X..",
+		"..XX...",
+		"....X..",
+		"......."
+	]
+];
+var problem_cur = 0;
+
+function another_example() {
+	problem_cur = ((problem_cur+1) % problems.length);
+	let problem = problems[problem_cur];
+	let table = document.getElementById('yinyang_table_id');
+	for ( let r = 0, n = table.rows.length; r < n; r++) {
+		for ( let c = 0, m = table.rows[r].cells.length; c < m; c++ ) {
+			let v = problem[r].slice(c, c+1).trim();
+			if ( '0Oo'.includes(v) )
+				v = 'O';
+			else if ( 'Xx1'.includes(v) )
+				v = 'X';
+			else
+				v = '';
+			table.rows[r].cells[c].firstChild.value = v;
+		}
+	}
+}
+
+</script>
+<style>
+body { font-size: 140%; font-family:"Lucida Sans Unicode", "Lucida Grande", "sans-serif"; }
+input {
+	width:2em;
+	border-width: 1;
+	border-style: solid;
+	border-color: rgb(160,160,160);
+	box-shadow: none;
+}
+
+.row {
+  display: flex;
+}
+.column {
+  flex: 50%;
+}
+</style>
+</head>
+
+<body>
+<h1>Yin-Yang Puzzle Solver <span style="font-size:50%">Edward Sitarski, August 2020</span></h1>
+<p>
+Enter the problem in the grid.  Use X and O for the initial cells.
+</p>
+<div class="row">
+<div class="column">
+<table id="yinyang_table_id">
+	<tbody>
+		<tr>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+		</tr>
+		<tr>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+		</tr>
+		<tr>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+		</tr>
+		<tr>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+		</tr>
+		<tr>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+		</tr>
+		<tr>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+		</tr>
+		<tr>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+		</tr>
+	</tbody>
+</table>
+</div>
+<div class="column" style="font-size:70%">
+<p>
+	<strong>Yin-Yang</strong> by Wei-Hwa Huang<br>
+	<br>
+	Put a white or dark circle in each cell so that all<br>
+	the white circles are connected along their edges in<br>
+	an unbroken chain and all the dark circles are<br>
+	connected along their edges in an unbroken chain.<br>
+	No two-by-two set of cells can be all white or all dark.<br>
+	<br>
+	<i>New York Times Magazine, Puzzles</i>
+</p>
+</div>
+</div>
+<hr>
+<button  id="solve_id" onclick="do_solve();">Solve</button>
+<input type="checkbox" id="animate_id" onchange="continue_animation=false;"><label for="animate_id" style="font-size:70%">Animate</label></input>
+<button onclick="another_example();">Another Example</button>
+<hr>
+<canvas width=300 height=300 id="canvas_id"></canvas>
+<p>States considered: <span id="states_considered_id"></span></p>
+
+<script>
+// Populate an initial problem.
+problem_cur = -1;
+another_example();
+</script>
+</body>
