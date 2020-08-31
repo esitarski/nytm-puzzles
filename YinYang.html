@@ -189,7 +189,7 @@ class YinYang {
 		}
 		
 		if( options_best === null )				// If no incomplete 2-squares are found, the grid is complete.
-			throw( new SolutionFound );
+			throw( new SolutionFound() );
 					
 		// Try each 2x2 solution option.
 		let square_save = get_square( this.grid, ...rc_best );
@@ -334,6 +334,15 @@ var problems = [
 		"..XX...",
 		"....X..",
 		"......."
+	],
+	[
+		"...O...",
+		"O..OO..",
+		"OO.....",
+		"...O...",
+		".....X.",
+		"..O..XO",
+		"..OO..."
 	]
 ];
 var problem_cur = 0;
