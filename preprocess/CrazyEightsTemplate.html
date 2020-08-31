@@ -1,0 +1,275 @@
+<html>
+<head>
+<script>
+"use strict";
+
+class SolutionFound extends Error {
+	// Some off-roading here.  Use throw to exit the recursion when we find a solution.
+	// So... catching this "Error" means success ;)
+}
+	
+{{wordlist}}
+
+function solve() {
+	let grid = [
+		[' ', ' ', ' ', ' '],
+		[' ', ' ', ' ', ' '],
+		[' ', ' ', ' ', ' '],
+		[' ', ' ', ' ', ' ']
+	];
+	for( let r = 0; r < 4; ++r ) {
+		for( let c = 0; c < 4; ++c ) {
+			document.getElementById( 's_' + (r+2) + '_' + (c+2) ).innerHTML = grid[r][c];
+		}
+	}
+
+	function gv( r, c ) {
+		return document.getElementById( 'rc_' + r + '_' + c ).value.toUpperCase();
+	}
+	
+	let rowStartsEnds = new Array( 4 );
+	let colStartsEnds = new Array( 4 );	
+	for( let i = 0; i < 4; ++i ) {
+		rowStartsEnds[i] = [
+			gv(i+2, 0) + gv(i+2,1),
+			gv(i+2, 6) + gv(i+2,7),
+		];
+		colStartsEnds[i] = [
+			gv(0, i+2) + gv(1, i+2),
+			gv(6, i+2) + gv(7, i+2),
+		];
+	}
+	
+	let rowPossible = [new Set(), new Set(), new Set(), new Set()];
+	let colPossible = [new Set(), new Set(), new Set(), new Set()];
+	
+	for( let r = 0; r < 4; ++r ) {
+		let i = 0;
+		for( ; i < wordlist.length; ++i )
+			if( wordlist[i].startsWith(rowStartsEnds[r][0] ) )
+				break;				
+		for( ; i < wordlist.length && wordlist[i].startsWith(rowStartsEnds[r][0]); ++i )
+			if( wordlist[i].endsWith(rowStartsEnds[r][1]) )
+				rowPossible[r].add( wordlist[i].slice(2,6) );
+	}
+	for( let c = 0; c < 4; ++c ) {
+		let i = 0;
+		for( ; i < wordlist.length; ++i )
+			if( wordlist[i].startsWith(colStartsEnds[c][0] ) )
+				break;				
+		for( ; i < wordlist.length && wordlist[i].startsWith(colStartsEnds[c][0]); ++i )
+			if( wordlist[i].endsWith(colStartsEnds[c][1]) )
+				colPossible[c].add( wordlist[i].slice(2,6) );
+	}
+	
+	for( let i = 0; i < 4; ++i ) {
+		if( rowPossible[i].size === 0 || colPossible[i].size === 0 ) {
+			alert( 'No starting possibilities found.' );
+			return;
+		}
+	}
+	
+	function search() {
+		// Find the row/col with the fewest choices available.
+		let set_min = null, rc_best = null;
+		for( let i = 0; i < 4; ++i ) {
+			if( rowPossible[i].size > 0 && (set_min === null || rowPossible[i].size < set_min.size) ) {
+				set_min = rowPossible[i];
+				rc_best = [[i,0],[i,1],[i,2],[i,3]];
+			}
+			if( colPossible[i].size > 0 && (set_min === null || colPossible[i].size < set_min.size) ) {
+				set_min = colPossible[i];
+				rc_best = [[0,i],[1,i],[2,i],[3,i]];
+			}
+		}
+		if( set_min === null ) {
+			for( let i = 0; i < 4; ++i ) {
+				if( rowPossible[i].size > 0 || colPossible[i].size > 0 )
+					return;
+			}
+			throw( new SolutionFound() );
+		}
+		
+		const choices = Array.from( set_min );
+		set_min.clear();
+		
+		// Save the current values of the grid.
+		let grid_save = new Array(4);
+		for( let j = 0; j < 4; ++j ) {
+			let [r, c] = rc_best[j];
+			grid_save[j] = grid[r][c];
+		}
+
+		// Try each choice in turn.
+		for( let i = 0; i < choices.length; ++i ) {
+			const choice = choices[i];
+			
+			// Set the choice.
+			for( let j = 0; j < 4; ++j ) {
+				let [r, c] = rc_best[j];
+				grid[r][c] = choice[j];
+			}
+			
+			// Remove all possibilities that are no longer possible from the other rows or columns.
+			let to_remove = [];
+			let is_feasible = true;
+			if( rc_best[0][0] === rc_best[1][0] ) {		// Check if we are setting a row.
+				const r = rc_best[0][0];
+				for( let c = 0; c < 4; ++c ) {
+					if( colPossible[c].size > 0 ) {
+						let in_conflict = [];
+						colPossible[c].forEach( (v) => { if( v[r] !== grid[r][c] ) in_conflict.push(v); } );
+						if( in_conflict.length === colPossible[c].size ) {
+							is_feasible = false;
+							break;
+						}
+						else
+							in_conflict.forEach( (v) => { to_remove.push( [colPossible[c], v] ); colPossible[c].delete(v); } );
+					}
+				}
+			}
+			else {										// Else we are setting a column.
+				const c = rc_best[0][1];
+				for( let r = 0; r < 4; ++r ) {
+					if( rowPossible[r].size > 0 ) {
+						let in_conflict = [];
+						rowPossible[r].forEach( (v) => { if( v[c] !== grid[r][c] ) in_conflict.push(v); } );
+						if( in_conflict.length === rowPossible[r].size ) {
+							is_feasible = false;
+							break;
+						}
+						else
+							in_conflict.forEach( (v) => { to_remove.push( [rowPossible[r], v] ); rowPossible[r].delete(v); } );
+					}
+				}
+			}
+			
+			if( is_feasible )
+				search();
+			
+			// Restore the state to what it was before the recursion.
+			// Restore the infeasible values.
+			for( let [s,p] of to_remove )
+				s.add( p );
+		}
+			
+		// Restore the grid.
+		for( let j = 0; j < rc_best.length; ++j ) {
+			let [r, c] = rc_best[j];
+			grid[r][c] = grid_save[j];
+		}
+		
+		// Restore the choices.
+		choices.forEach( p => set_min.add(p) );
+	}
+	
+	try {
+		search();
+	}
+	catch ( result  ) {
+		if ( result instanceof SolutionFound ) {
+			for( let r = 0; r < 4; ++r ) {
+				for( let c = 0; c < 4; ++c ) {
+					document.getElementById( 's_' + (r+2) + '_' + (c+2) ).innerHTML = grid[r][c];
+				}
+			}
+		}
+		else
+			throw( result );
+	}
+}
+
+function init_table( problem ) {
+	let table = document.getElementById( 'problem' );
+	let tbody = document.createElement("tbody");
+	table.appendChild( tbody );
+	for( let r = 0; r < 8; ++r ) {
+		let tr = document.createElement("tr");
+		tbody.appendChild( tr );
+		for( let c = 0; c < 8; ++c ) {
+			const v = problem[r][c];
+			if( v == ' ' )
+				tr.appendChild( document.createElement("td") );
+			else if( v == '.' ) {
+				let td = document.createElement("td");
+				td.setAttribute( 'id', 's_' + r + '_' + c );
+				tr.appendChild( td );
+			}
+			else {
+				let td = document.createElement("td");
+				tr.appendChild( td );
+				
+				let input = document.createElement("input");
+				input.setAttribute( 'id', 'rc_' + r + '_' + c );
+				input.value = v;
+				td.appendChild( input );
+			}
+		}
+	}
+}
+
+var problems = [
+	[
+		"  RSVL  ",
+		"  UQEI  ",
+		"RE....ED",
+		"TR....RS",
+		"UM....LA",
+		"FL....DS",
+		"  GERU  ",
+		"  ADAM  ",
+	]
+];
+
+function onLoad() {
+	init_table( problems[0] );
+}
+
+</script>
+
+<style>
+body { font-size: 120%; font-family:"Lucida Sans Unicode", "Lucida Grande", "sans-serif"; }
+input {
+	width:2em;
+	border-width: 1;
+	border-style: solid;
+	border-color: rgb(160,160,160);
+	box-shadow: none;
+}
+
+ol {
+  columns: 4;
+}
+
+.row {
+  display: flex;
+}
+.column {
+  flex: 50%;
+}
+</style>
+</head>
+<body onload="onLoad();">
+<h1>Crazy Eights Solver <span style="font-size:50%">Edward Sitarski, August 2020</span></h1>
+<p>
+Enter the problem below.  Then press Solve.
+</p>
+<div class="row">
+	<div class="column">
+		<table id="problem">
+		</table>
+	</div>
+	<div class="column" style="font-size:70%">
+	<p>
+		<strong>Crazy Eights</strong> by Patrick Berry<br>
+		<br>
+		Fill the empty spaces to form eight-letter words reading<br>
+		Across and Down<br>
+		<br>
+		<i>New York Times Magazine, Puzzles</i>
+	</p>
+	</div>
+</div>
+<button onclick="solve();">Solve</button>
+</body>
+</html>

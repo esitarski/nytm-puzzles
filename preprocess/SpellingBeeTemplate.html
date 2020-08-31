@@ -1,0 +1,115 @@
+<html>
+<head>
+<script>
+"use strict";
+	
+{{wordlist}}
+
+function has_all( word ) {
+	let s = new Set();
+	for( let j = word.length; j--; )
+		s.add( word[j] );
+	return s.size >= 7;
+}
+
+function get_words( center, other ) {
+	center = center.toUpperCase();
+	other = other.toUpperCase();
+	
+	const regex = new RegExp( "^[" + center + other + "]+$" );
+	let matched = [];
+	let score = 0;
+	for( let i = 0; i < wordlist.length; ++i ) {
+		const word = wordlist[i];
+		if( word.match(regex) && word.includes(center) ) {
+			matched.push( word );
+			score += (has_all(word) ? 3 : 1)
+		}
+	}
+	return [matched, score];
+}
+
+function solve() {
+	const center = document.getElementById('c_center').value;
+	let other = [];
+	for( let i = 0; i < 6; ++i )
+		other.push( document.getElementById('c_'+i).value );
+	other = other.join('');
+		
+	const [matched, score] = get_words( center, other );
+	let answers = document.getElementById('answers');
+	answers.innerHTML = '';
+	for( let i = 0; i < matched.length; ++i ) {
+		let li = document.createElement("li");
+		li.appendChild( document.createTextNode(matched[i] + (has_all(matched[i]) ? ' *' : '') ) );
+		answers.appendChild( li );
+	}
+	document.getElementById('score').innerHTML = score;
+}
+
+</script>
+
+<style>
+body { font-size: 120%; font-family:"Lucida Sans Unicode", "Lucida Grande", "sans-serif"; }
+input {
+	width:2em;
+	border-width: 1;
+	border-style: solid;
+	border-color: rgb(160,160,160);
+	box-shadow: none;
+}
+
+ol {
+  columns: 4;
+}
+
+.row {
+  display: flex;
+}
+.column {
+  flex: 50%;
+}
+</style>
+</head>
+<body>
+<h1>Spelling Bee Solver <span style="font-size:50%">Edward Sitarski, August 2020</span></h1>
+<p>
+Enter the letters below.  The first letter is the center.  Then press Solve.
+</p>
+<div class="row">
+	<div class="column">
+		<input value="V" id="c_center">
+		<br/>
+		<input value="E" id="c_0">
+		<input value="R" id="c_1">
+		<input value="O" id="c_2">
+		<input value="N" id="c_3">
+		<input value="M" id="c_4">
+		<input value="I" id="c_5">
+	</div>
+	<div class="column" style="font-size:70%">
+	<p>
+		<strong>Spelling Bee</strong> by Frank Longo<br>
+		<br>
+		How many common words of 5 or more letters can<br>
+		you spell using the letters in the hive?  Every answer<br>
+		must use the center letter at least once.  Letters may<br>
+		be reused in a word.  At least one word will use all 7<br>
+		letters.  Proper names and hyphenated words are not<br>
+		allowed.  Score 1 point for each answer, and 3 points<br>
+		for a word that uses all 7 letters.<br>
+		<br>
+		Rating 8 = good, 15 = excellent; 22 = genius<br>
+		<br>
+		<i>New York Times Magazine, Puzzles</i>
+	</p>
+	</div>
+</div>
+
+<button onclick="solve();">Solve</button>
+<hr/>
+Score: <span id="score"></span>
+<ol id="answers">
+</ol>
+</body>
+</html>
