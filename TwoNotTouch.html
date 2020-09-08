@@ -249,13 +249,13 @@ class TwoNotTouch {
 		const radius = ctx.lineWidth / 2;
 		for( const [k,v] of edge_map.entries() ) {
 			if( v.size > 1 ) {
-				const [r1, c1, r2, c2] = k.split(',').map( x => { return parseInt(x); } );
+				const [r1, c1, r2, c2] = k.split(',').map( x => { return parseInt(x, 10); } );
 				ctx.beginPath();
 				ctx.moveTo( ...xy(r1,c1) );
 				ctx.lineTo( ...xy(r2,c2) ); 
 				ctx.stroke()
 				
-				// Put nice round rnds on the lines.
+				// Put nice round ends on the lines.
 				ctx.beginPath();
 				ctx.arc( ...xy(r1,c1), radius, 0, 2.0*Math.PI );
 				ctx.fill()
