@@ -151,7 +151,7 @@ class TwoNotTouch {
 							region.delete( coord_cur );
 							removed.push( [region, coord_cur] );
 							
-							// Check if removing the adjacent position makes this region too small for its required stars.
+							// Check if removing the adjacent position makes this region too small for remaining stars.
 							if( (r_d || c_d) && region.size < (2-this.star_count.get(key)) ) {
 								star_feasible = false;
 								break;
@@ -161,7 +161,7 @@ class TwoNotTouch {
 				}
 			}
 			
-			// Continue with the recursive search.
+			// Continue with the recursive search if no infeasibilities were found.
 			if( star_feasible )
 				this.search();
 			
