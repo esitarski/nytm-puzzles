@@ -6,7 +6,7 @@
 <script>
 //-----------------------------------------------------------------------
 //
-// Constraint Propagation solver for Two Not Toucn puzzle from New York Times Magazine.
+// Constraint Propagation solver for Two Not Toucn puzzle from the New York Times.
 //
 // Edward Sitarski
 // September 8th, 2020
@@ -20,13 +20,15 @@ class SolutionFound extends Error {
 	// So... catching this "Error" means success ;)
 }
 
-class InfeasibleStar extends Error {
-}
-
+// Sadly, Javascirpt cannot use arrays as keys (unless the array is the same object).
+// For this reason, we have to convert coordinates to strings and back again so we
+// can look them up efficiently.
 function to_coord( r, c ) { return r + ',' + c; }
 function from_coord( coord ) { return coord.split(',').map( x => parseInt(x,10) ); }
 
+// List of all 9 cell offsets from a given cell (includes origin).
 const i_adjacent = [[0,0], [1,0], [-1,0], [0,1], [0,-1], [1,1], [-1,1], [1,-1], [-1,-1]];
+
 class TwoNotTouch {
 	constructor( callback=null ) {
 		this.callback = callback;
@@ -58,6 +60,8 @@ class TwoNotTouch {
 		}
 		
 		const grid_size = this.regions_grid.length;
+		
+		// Row and column constraints are handled just like any other region.
 		
 		// Add regions for the columns.
 		for ( let r = 0; r < grid_size; ++r) {
@@ -107,7 +111,7 @@ class TwoNotTouch {
 		
 		++this.state_count;
 		
-		// Find the region with fewer than 2 stars of smallest size.
+		// Find the region with fewer than 2 stars with fewest available coords.
 		let kr_best = null;
 		for( let [k, r] of this.regions.entries() ) {
 			if( this.star_count.get(k) < 2 && (kr_best === null || kr_best.region.size > r.size) )
@@ -117,7 +121,7 @@ class TwoNotTouch {
 		if( kr_best === null )
 			throw( new SolutionFound() );
 		
-		// Try putting a star in each available location in this region.
+		// Try putting a star in each available coord in this region.
 		for( const coord of Array.from(kr_best.region) ) {
 			
 			// Propagate the new star location.
@@ -132,7 +136,7 @@ class TwoNotTouch {
 					star_feasible = false;
 			}
 			
-			// Remove the star's position, and all adjacent positions.
+			// Remove the star's position, and all adjacent positions from all regions.
 			let removed = new Array();
 			for( const [r_d, c_d] of i_adjacent ) {
 				if( !star_feasible )
@@ -146,7 +150,8 @@ class TwoNotTouch {
 						if( region.has(coord_cur) ) {
 							region.delete( coord_cur );
 							removed.push( [region, coord_cur] );
-							// Check if removing the adjacent position makes this region too small for its remaining stars.
+							
+							// Check if removing the adjacent position makes this region too small for its required stars.
 							if( (r_d || c_d) && region.size < (2-this.star_count.get(key)) ) {
 								star_feasible = false;
 								break;
@@ -314,7 +319,7 @@ function do_solve() {
 			states_considered.innerHTML = tnt.state_count;		
 		}
 	}
-	interval_id = setInterval( draw_state, 1000/25 );
+	interval_id = setInterval( draw_state, 1000/10 );
 }
 
 var problems = [
@@ -380,7 +385,7 @@ input {
 <body>
 <h1>Two Not Touch Puzzle Solver <span style="font-size:50%">Edward Sitarski, September 2020</span></h1>
 <p>
-Enter the problem in the grid.  Use unique characters to indicate the the regions.
+Enter the problem in the grid.  Use any unique characters to indicate the the regions.
 </p>
 <div class="row">
 <div class="column">
