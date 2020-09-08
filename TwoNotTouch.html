@@ -1,0 +1,536 @@
+<html>
+<head>
+<meta name="description" content="Constraint-based Solver for Yin-Yang puzzle by Wei-Hwa Huang">
+<meta name="keywords" content="Yin-Yang,New York Times, Puzzles,Wei-Hwa Huang">
+<meta name="author" content="Edward Sitarski">
+<script>
+//-----------------------------------------------------------------------
+//
+// Constraint Propagation solver for Two Not Toucn puzzle from New York Times Magazine.
+//
+// Edward Sitarski
+// September 8th, 2020
+// Toronto, Ontario, Canada
+//
+//-----------------------------------------------------------------------
+"use strict";
+
+class SolutionFound extends Error {
+	// Some off-roading here.  Use throw to exit the recursion when we find a solution.
+	// So... catching this "Error" means success ;)
+}
+
+class InfeasibleStar extends Error {
+}
+
+function to_coord( r, c ) { return r + ',' + c; }
+function from_coord( coord ) { return coord.split(',').map( x => parseInt(x,10) ); }
+
+const i_adjacent = [[0,0], [1,0], [-1,0], [0,1], [0,-1], [1,1], [-1,1], [1,-1], [-1,-1]];
+class TwoNotTouch {
+	constructor( callback=null ) {
+		this.callback = callback;
+		this.set_problem();
+		this.stars = new Array();
+	}
+	
+	set_problem() {
+		this.regions = new Map();
+		this.regions_grid = new Array();	// 2-d array with all key/regions pairs.
+		this.star_count = new Map();		// number of stars per region.
+		let table = document.getElementById('twonottouch_table_id');
+		
+		// Add the regions from the html.
+		for ( let r = 0, n = table.rows.length; r < n; r++) {
+			let regions_row = new Array( table.rows.length );
+			for ( let c = 0, m = table.rows[r].cells.length; c < m; c++ ) {
+				const v = table.rows[r].cells[c].firstChild.value.trim();
+				table.rows[r].cells[c].firstChild.value = v;
+				
+				if( !this.regions.has(v) ) {
+					this.regions.set( v, new Set() );
+					this.star_count.set( v, 0 );
+				}
+				this.regions.get(v).add( to_coord(r,c) );
+				regions_row[c] = [v];
+			}
+			this.regions_grid.push( regions_row );
+		}
+		
+		const grid_size = this.regions_grid.length;
+		
+		// Add regions for the columns.
+		for ( let r = 0; r < grid_size; ++r) {
+			const key = 'r' + r;
+			let region = new Set();
+			for ( let c = 0; c < grid_size; ++c ) {
+				region.add( to_coord(r,c) );
+				this.regions_grid[r][c].push( key );
+			}
+			this.regions.set( key,region );
+			this.star_count.set( key, 0 );	
+		}
+		
+		// Add regions for the rows.
+		for ( let c = 0; c < grid_size; ++c ) {
+			const key = 'c' + c;
+			let region = new Set();
+			for ( let r = 0; r < grid_size; ++r ) {
+				region.add( to_coord(r,c) );
+				this.regions_grid[r][c].push( key );
+			}
+			this.regions.set( key, region );
+			this.star_count.set( key, 0 );
+		}
+	}
+	
+	to_console() {
+		console.log( '****' );
+		const grid_size = this.regions_grid.length;
+		for( let r = 0; r < grid_size; ++r ) {
+			let row = new Array();
+			for( let c = 0; c < grid_size; ++c ) {
+				for( let j = 0; j < this.regions_grid[r][c].length; ++j ) {
+					if( j != 0 )
+						row.push( ',' );
+					row.push( this.regions_grid[r][c][j] );
+				}
+				row.push( '-' );
+			}
+			console.log( row.join('') );
+		}
+	}
+			
+	search() {
+		if ( this.callback )
+			this.callback( this );
+		
+		++this.state_count;
+		
+		// Find the region with fewer than 2 stars of smallest size.
+		let kr_best = null;
+		for( let [k, r] of this.regions.entries() ) {
+			if( this.star_count.get(k) < 2 && (kr_best === null || kr_best.region.size > r.size) )
+				kr_best = {"key":k, "region":r};
+		}
+		
+		if( kr_best === null )
+			throw( new SolutionFound() );
+		
+		// Try putting a star in each available location in this region.
+		for( const coord of Array.from(kr_best.region) ) {
+			
+			// Propagate the new star location.
+			const [r, c] = from_coord( coord );
+			this.stars.push( [r,c] );
+			
+			// Add the star to all regions containing this coord.
+			let star_feasible = true;
+			for( const key of this.regions_grid[r][c] ) {
+				this.star_count.set( key, this.star_count.get(key) + 1 );
+				if( this.star_count.get(key) > 2 )	// Check if adding the star exceeds the maximum for the region.
+					star_feasible = false;
+			}
+			
+			// Remove the star's position, and all adjacent positions.
+			let removed = new Array();
+			for( const [r_d, c_d] of i_adjacent ) {
+				if( !star_feasible )
+					break;
+				
+				const r_cur = r + r_d, c_cur = c + c_d;
+				if( 0 <= r_cur && r_cur < this.regions_grid.length && 0 <= c_cur && c_cur < this.regions_grid.length ) {
+					const coord_cur = to_coord(r_cur, c_cur);
+					for( const key of this.regions_grid[r_cur][c_cur] ) {
+						let region = this.regions.get(key);
+						if( region.has(coord_cur) ) {
+							region.delete( coord_cur );
+							removed.push( [region, coord_cur] );
+							// Check if removing the adjacent position makes this region too small for its remaining stars.
+							if( (r_d || c_d) && region.size < (2-this.star_count.get(key)) ) {
+								star_feasible = false;
+								break;
+							}
+						}
+					}
+				}
+			}
+			
+			// Continue with the recursive search.
+			if( star_feasible )
+				this.search();
+			
+			// Uncommit the star.
+			this.stars.pop();
+			for( const key of this.regions_grid[r][c] )
+				this.star_count.set( key, this.star_count.get(key) - 1 );
+			
+			// Restore all the removed coords.
+			while( removed.length ) {
+				let [region, coord] = removed.pop();
+				region.add( coord );
+			}
+		}
+	}
+	
+	solve() {
+		if ( this.callback )
+			this.callback( this );
+		this.state_count = 0;
+		
+		try {
+			this.search();
+		}
+		catch( result ) {
+			if ( result instanceof SolutionFound )
+				return true;
+			else
+				throw( result );
+		}
+		return false;
+	}
+	
+	graphic( canvas ) {
+		const frame_size = canvas.width;
+		let ctx = canvas.getContext("2d");
+		
+		ctx.clearRect( 0, 0, canvas.width, canvas.height );
+		
+		const border = frame_size / 20;
+		const grid_size = this.regions_grid.length;
+		const cell_size = (frame_size - border*2) / grid_size;
+		
+		let xy = ( r, c ) => [border + cell_size * c, border + cell_size * r];
+		
+		// Draw the grid.
+		ctx.lineWidth = 1;
+		ctx.strokeStyle = 'rgb(160,160,160)';
+		for ( let i = 0; i <= grid_size; ++i ) {
+			ctx.beginPath(); ctx.moveTo( ...xy(0, i) ); ctx.lineTo( ...xy(grid_size, i) ); ctx.stroke();
+			ctx.beginPath(); ctx.moveTo( ...xy(i, 0) ); ctx.lineTo( ...xy(i, grid_size) ); ctx.stroke();
+		}
+
+		// Draw the border.
+		ctx.lineWidth = frame_size / 60;
+		ctx.strokeStyle = '#000000';
+		ctx.beginPath();
+		ctx.moveTo( ...xy(0,0) );
+		ctx.lineTo( ...xy(0, grid_size) ); 
+		ctx.lineTo( ...xy(grid_size, grid_size) ); 
+		ctx.lineTo( ...xy(grid_size, 0) ); 
+		ctx.closePath();
+		ctx.stroke()
+		
+		// Draw the regions
+		let edge_map = new Map();
+		function add_edge( r1, c1, r2, c2, dk ) {
+			const key = [r1, c1, r2, c2].join( ',' );
+			if( !edge_map.has(key) )
+				edge_map.set( key, new Set() );
+			edge_map.get( key ).add( dk );
+		}
+		
+		let table = document.getElementById('twonottouch_table_id');
+		for ( let r = 0, n = table.rows.length; r < n; r++) {
+			for ( let c = 0, m = table.rows[r].cells.length; c < m; c++ ) {
+				const v = table.rows[r].cells[c].firstChild.value.trim();
+				add_edge( r  , c  , r  , c+1, v );
+				add_edge( r+1, c  , r+1, c+1, v );
+				add_edge( r  , c  , r+1, c  , v );
+				add_edge( r  , c+1, r+1, c+1, v );
+			}
+		}
+		
+		const radius = ctx.lineWidth / 2;
+		for( const [k,v] of edge_map.entries() ) {
+			if( v.size > 1 ) {
+				const [r1, c1, r2, c2] = k.split(',').map( x => { return parseInt(x); } );
+				ctx.beginPath();
+				ctx.moveTo( ...xy(r1,c1) );
+				ctx.lineTo( ...xy(r2,c2) ); 
+				ctx.stroke()
+				
+				// Put nice round rnds on the lines.
+				ctx.beginPath();
+				ctx.arc( ...xy(r1,c1), radius, 0, 2.0*Math.PI );
+				ctx.fill()
+				
+				ctx.beginPath();
+				ctx.arc( ...xy(r2,c2), radius, 0, 2.0*Math.PI );
+				ctx.fill()
+			}
+		}
+		
+		// Draw the stars.
+		ctx.textAlign = "center";
+		ctx.textBaseline = "middle";
+		ctx.font = (cell_size * 0.8) + "px Helvetica";
+		for( let i = this.stars.length; i--; ) {
+			const [x, y] = xy( ...this.stars[i] );
+			ctx.fillText("\uD83D\uDFCA", x + cell_size/2, y + cell_size/2);
+		}
+	}
+}
+
+var continue_animation = true;
+var interval_id = null;
+function do_solve() {
+	let canvas = document.getElementById('canvas_id');
+	let states_considered = document.getElementById('states_considered_id');
+	const animate = document.getElementById("animate_id").checked;
+	
+	// Stop the current animation.
+	continue_animation = animate;
+	if ( interval_id !== null ) {
+		clearInterval( interval_id );
+		interval_id = null;
+	}
+	
+	// So the solve.
+	// Keep track of all the intermediate solver states.
+	var states = [];
+	function store_state( tnt ) {
+		states.push( tnt.stars.slice(0) );
+	}
+	let tnt = new TwoNotTouch( animate ? store_state : null );
+	if( !tnt.solve() )
+		alert( 'No solution found.  Check that the problem is input correctly.' );
+	store_state( tnt );
+	
+	// Play the states back to show the solution process.
+	states.reverse();
+	function draw_state() {
+		if ( !continue_animation )
+			states = states.slice( 0, 1 );
+		
+		if ( states.length > 0 ) {
+			tnt.stars = states.pop();
+			tnt.graphic( canvas );
+			states_considered.innerHTML = (tnt.state_count - states.length) + ' / ' + tnt.state_count;
+		}
+		else {
+			clearInterval( interval_id );
+			interval_id = null;
+			states_considered.innerHTML = tnt.state_count;		
+		}
+	}
+	interval_id = setInterval( draw_state, 1000/25 );
+}
+
+var problems = [
+	[
+		"ABBBBBBBBB",
+		"AAAABBCBBB",
+		"AAACCCCBBB",
+		"ADAEEEFFFF",
+		"DDDDDEFFGG",
+		"DDDDDEFGGG",
+		"HIIIDDDGGG",
+		"HHHHHHDGGG",
+		"HHHHHHHHGG",
+		"HHHJJJJJGG"
+	],
+	[
+		"AAABBBBCCC",
+		"ABBBDDDCCC",
+		"AAABDDFECE",
+		"DDAADDFEEE",
+		"DDDDDFFFEF",
+		"DDGGDFFFFF",
+		"IIJGGGGHHF",
+		"IJJGGGHHHH",
+		"IJJGHHHHHH",
+		"IIGGHHHHHH"
+	],
+];
+var problem_cur = 0;
+
+function another_example() {
+	problem_cur = ((problem_cur+1) % problems.length);
+	let problem = problems[problem_cur];
+	let table = document.getElementById('twonottouch_table_id');
+	for ( let r = 0, n = table.rows.length; r < n; r++) {
+		for ( let c = 0, m = table.rows[r].cells.length; c < m; c++ ) {
+			let v = problem[r].slice(c, c+1);
+			table.rows[r].cells[c].firstChild.value = v;
+		}
+	}
+}
+
+</script>
+<style>
+body { font-size: 140%; font-family:"Lucida Sans Unicode", "Lucida Grande", "sans-serif"; }
+input {
+	width:2em;
+	border-width: 1;
+	border-style: solid;
+	border-color: rgb(160,160,160);
+	box-shadow: none;
+}
+
+.row {
+  display: flex;
+}
+.column {
+  flex: 50%;
+}
+</style>
+</head>
+
+<body>
+<h1>Two Not Touch Puzzle Solver <span style="font-size:50%">Edward Sitarski, September 2020</span></h1>
+<p>
+Enter the problem in the grid.  Use unique characters to indicate the the regions.
+</p>
+<div class="row">
+<div class="column">
+<table id="twonottouch_table_id">
+	<tbody>
+		<tr>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+		</tr>
+		<tr>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+		</tr>
+		<tr>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+		</tr>
+		<tr>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+		</tr>
+		<tr>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+		</tr>
+		<tr>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+		</tr>
+		<tr>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+		</tr>
+		<tr>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+		</tr>
+		<tr>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+		</tr>
+		<tr>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+			<td><input/></td>
+		</tr>
+	</tbody>
+</table>
+</div>
+<div class="column" style="font-size:70%">
+<p>
+	<strong>Two Not Touch</strong> by ?<br>
+	<br>
+	Put two stars in each row, column and region of the grid.<br>
+	No two stars may touch, not even diagonally.<br>
+	<br>
+	<i>New York Times, Puzzles</i>
+</p>
+</div>
+</div>
+<hr>
+<button  id="solve_id" onclick="do_solve();">Solve</button>
+<input type="checkbox" id="animate_id" onchange="continue_animation=false;"><label for="animate_id" style="font-size:70%">Animate</label></input>
+<button onclick="another_example();">Another Example</button>
+<hr>
+<canvas width=300 height=300 id="canvas_id"></canvas>
+<p>States considered: <span id="states_considered_id"></span></p>
+
+<script>
+// Populate an initial problem.
+problem_cur = -1;
+another_example();
+</script>
+</body>
