@@ -122,6 +122,7 @@ class TwoNotTouch {
 			throw( new SolutionFound() );
 		
 		// Try putting a star in each available coord in this region.
+		let removed = new Array();
 		for( const coord of Array.from(kr_best.region) ) {
 			
 			// Propagate the new star location.
@@ -137,7 +138,6 @@ class TwoNotTouch {
 			}
 			
 			// Remove the star's position, and all adjacent positions from all regions.
-			let removed = new Array();
 			for( const [r_d, c_d] of i_adjacent ) {
 				if( !star_feasible )
 					break;
