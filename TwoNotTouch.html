@@ -20,7 +20,7 @@ class SolutionFound extends Error {
 	// So... catching this "Error" means success ;)
 }
 
-// Sadly, Javascirpt cannot use arrays as keys (well, unless the array is the same object).
+// Sadly, Javascirpt cannot use arrays as keys (well, unless the array is always the same object).
 // For this reason, we encode coordinates to integers, which will work in Map and Set.
 function to_coord( r, c ) { return (r<<16) | c; }
 function from_coord( coord ) { return [coord>>16, coord&0xFFFF]; }
