@@ -239,8 +239,8 @@ class TwoNotTouch {
 		
 		let table = document.getElementById('twonottouch_table_id');
 		
-		for ( let r = 0, n = table.rows.length; r < n; r++) {
-			for ( let c = 0, m = table.rows[r].cells.length; c < m; c++ ) {
+		for ( let r = table.rows.length; r--; ) {
+			for ( let c = table.rows[r].cells.length; c--; ) {
 				const v = table.rows[r].cells[c].firstChild.value.trim();
 				add_edge( r  , c  , r  , c+1, v );
 				add_edge( r+1, c  , r+1, c+1, v );
@@ -251,7 +251,7 @@ class TwoNotTouch {
 		
 		const radius = ctx.lineWidth / 2;
 		for( const [edge,regions] of edge_map.entries() ) {
-			// Draw the edge only if it is shared between regions.
+			// Draw the edge only if it separates two regions.
 			if( regions.size != 1 ) {
 				const [r1, c1, r2, c2] = edge.split(',').map( x => { return parseInt(x, 10); } );
 				ctx.beginPath();
@@ -274,10 +274,8 @@ class TwoNotTouch {
 		ctx.textAlign = "center";
 		ctx.textBaseline = "middle";
 		ctx.font = (cell_size * 0.8) + "px Helvetica";
-		for( let i = this.stars.length; i--; ) {
-			const [x, y] = xy( ...this.stars[i] );
-			ctx.fillText("\uD83D\uDFCA", x + cell_size/2, y + cell_size/2);
-		}
+		for( const rc of this.stars )
+			ctx.fillText("\uD83D\uDFCA", ...xy(...rc).map( v => { return v + cell_size / 2; } ));
 	}
 }
 
